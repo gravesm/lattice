@@ -14,18 +14,18 @@ type DbMvtRepository DbRepository
 func (db DbMvtRepository) Tile(w, s, e, n float64) ([]byte, error) {
 	var tile []byte
 	sql := `
-		SELECT ST_AsMVT(q, 'states', 4096, 'geom') mvt
+		SELECT ST_AsMVT(q, NULL, 4096, 'geom')
 		FROM (
 			SELECT
 				ST_AsMVTGeom(
-					geom,
-					ST_MakeEnvelope($1, $2, $3, $4, 4326),
+					ST_Transform(geom, 3857),
+					ST_MakeEnvelope($1, $2, $3, $4, 3857),
 					4096,
-					80,
-					false
-				) geom
+					256,
+					true
+				) AS geom
 			FROM states
-		) q`
+		) AS q`
 	err := db.conn.Get(&tile, sql, w, s, e, n)
 	return tile, err
 }
