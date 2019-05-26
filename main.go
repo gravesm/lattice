@@ -13,7 +13,8 @@ import (
 )
 
 type Env struct {
-	tiler Tiler
+	tiler  Tiler
+	layers LayerRepository
 }
 
 func main() {
@@ -52,8 +53,13 @@ func main() {
 					Value: "postgres",
 					Usage: "Database user",
 				},
+				cli.StringFlag{
+					Name:  "layers",
+					Usage: "Filename of JSON layer list",
+				},
 			},
 			Action: func(c *cli.Context) error {
+				var layers LayerRepository
 				conn := fmt.Sprintf("host=%s port=%d user=%s password='%s' dbname=%s "+
 					"sslmode=disable", c.String("db-hostname"), c.Int("db-port"),
 					c.String("db-username"), c.String("db-password"), c.String("db-name"))
@@ -61,9 +67,19 @@ func main() {
 				defer db.Close()
 				repo := DbMvtRepository{conn: db}
 				tiler := MvtTiler{repo: repo}
-				env := Env{tiler}
+				if c.String("layers") != "" {
+					f, err := os.Open(c.String("layers"))
+					if err != nil {
+						log.Fatal(err)
+					}
+					layers = NewJsonRepo(f)
+					f.Close()
+				} else {
+					layers = &MemLayerRepository{}
+				}
+				env := Env{tiler, layers}
 				r := mux.NewRouter()
-				r.HandleFunc("/{x:[0-9]+}/{y:[0-9]+}/{z:[0-9]+}", env.getTile)
+				r.HandleFunc("/{layer:[a-z]+}/{x:[0-9]+}/{y:[0-9]+}/{z:[0-9]+}", env.getTile)
 				http.Handle("/", r)
 				srv := &http.Server{
 					Handler:      r,
@@ -89,10 +105,11 @@ func (env *Env) getTile(w http.ResponseWriter, r *http.Request) {
 	x, _ := strconv.Atoi(vars["x"])
 	y, _ := strconv.Atoi(vars["y"])
 	z, _ := strconv.Atoi(vars["z"])
-	mvt, err := env.tiler.GetTile(x, y, z)
+	l := env.layers.Find(vars["layer"])
+	mvt, err := env.tiler.GetTile(x, y, z, l)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprint(w, "%v", err)
+		fmt.Fprintf(w, "%v", err)
 		return
 	}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
